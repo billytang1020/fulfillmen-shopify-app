@@ -1,0 +1,38 @@
+# Fulfillmen Logistics Shopify App Configuration
+# Production configuration for Partner Dashboard / CLI deploy
+# App URL: https://app.fulfillmen.com
+
+# Client ID from Shopify Partners Dashboard
+# TODO: Add client_id after app creation in Partners Dashboard
+# client_id = ""
+
+name = "Fulfillmen Logistics"
+application_url = "https://app.fulfillmen.com"
+embedded = true
+
+[access_scopes]
+scopes = "read_assigned_fulfillment_orders,read_products,write_assigned_fulfillment_orders,write_fulfillments"
+
+[auth]
+redirect_urls = [
+  "https://app.fulfillmen.com/auth/callback",
+  "https://app.fulfillmen.com/auth/shopify/callback"
+]
+
+[webhooks]
+api_version = "2024-01"
+
+[[webhooks.subscriptions]]
+topics = ["fulfillment_orders/cancellation_request_submitted"]
+uri = "https://app.fulfillmen.com/webhooks"
+
+[[webhooks.subscriptions]]
+topics = ["fulfillment_orders/fulfillment_request_submitted"]
+uri = "https://app.fulfillmen.com/webhooks"
+
+[[webhooks.subscriptions]]
+topics = ["fulfillment_orders/order_routing_complete"]
+uri = "https://app.fulfillmen.com/webhooks"
+
+[pos]
+embedded = false
