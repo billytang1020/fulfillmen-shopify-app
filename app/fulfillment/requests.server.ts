@@ -1,12 +1,15 @@
 /**
  * Fulfillment Request 处理逻辑
  *
- * 契约: shopify_node_wms_contract_v1.md v1.7.6
+ * 契约: shopify_node_wms_contract_v1.md v1.7.9
  *
- * 核心变更 (v1.7.6):
- * - 36053 SKU_NOT_MAPPED: 不再拒绝 FO，改为 accept + sync-fail
- * - 其他 VALIDATION 错误码 (36054-36060, 36066): 仍然拒绝 FO
- * - Node 本地 SKU_MISSING: 仍然拒绝 FO
+ * 核心变更:
+ * - v1.7.6: SKU_NOT_MAPPED (36053) accept + sync-fail
+ * - v1.7.9: 更多 soft 错误码 (36054, 36055, 36056, 36058) accept + sync-fail
+ * - v1.7.9 hotfix: 已 accept 的 FO 在 Sync Retry 遇硬错误时不 reject
+ *
+ * 硬错误 (仍 reject FO): 36057, 36059, 36060, 36066, CONFLICT 类
+ * Node 本地 SKU_MISSING: 仍然 reject FO
  */
 
 import {
@@ -177,13 +180,24 @@ export function handleSubmitError(error: WmsSubmitError): HandleSubmitResult {
 /**
  * 构建接受 FO 时的消息
  *
- * 注意: 不声称有仓单号 (因为 SKU_NOT_MAPPED 时还没有 wmsOrderNo)
+ * 注意: 不声称有仓单号 (soft 错误时还没有 wmsOrderNo)
+ * v1.7.9: 扩展支持更多 soft 错误码
  */
 function buildAcceptMessage(errorCode: string): string {
-  if (errorCode === "SKU_NOT_MAPPED") {
-    return "Order received. SKU mapping required before fulfillment.";
+  switch (errorCode) {
+    case "SKU_NOT_MAPPED":
+      return "Order received. SKU mapping required before fulfillment.";
+    case "SKU_INACTIVE":
+      return "Order received. Product SKU is inactive, please activate it to proceed.";
+    case "NO_ROUTE":
+      return "Order received. Shipping channel configuration required before fulfillment.";
+    case "COUNTRY_NOT_SUPPORTED":
+      return "Order received. Country shipping support required before fulfillment.";
+    case "INSUFFICIENT_STOCK":
+      return "Order received. Stock will be checked during warehouse fulfillment.";
+    default:
+      return "Order received. Processing in progress.";
   }
-  return "Order received. Processing in progress.";
 }
 
 /**
@@ -228,4 +242,60 @@ export function shouldUseSameExternalNo(
   }
 
   return false;
+}
+
+/**
+ * Sync Retry 专用: 处理已 accept FO 在重试时的 WMS 错误
+ *
+ * v1.7.9 hotfix: 解决以下 bug:
+ * - FO 已通过 soft path accept (status=SYNC_FAILED, shopifyAccepted=true)
+ * - Sync Retry 时 WMS 返回硬 VALIDATION 错误 (如 INSUFFICIENT_STOCK 变硬)
+ * - 不应调用 shopify.reject (因为 FO 已 accept，reject 会失败 → REJECT_FAILED)
+ * - 保持 SYNC_FAILED 状态 + 错误码，让商家可以再次 Retry
+ *
+ * @param error WMS 返回的错误
+ * @param foSyncRecord 当前 FO 同步记录
+ * @returns 处理结果 (已 accept FO 遇硬错误时会阻止 reject)
+ */
+export function handleRetrySubmitError(
+  error: WmsSubmitError,
+  foSyncRecord: {
+    shopifyAccepted: boolean;
+    status: FoSyncStatus;
+  }
+): HandleSubmitResult {
+  const baseResult = handleSubmitError(error);
+
+  // 如果 FO 已被 Shopify accept，且 baseResult 要求 reject FO，则阻止 reject
+  // 保持 SYNC_FAILED 状态，让商家可以重试
+  if (foSyncRecord.shopifyAccepted && baseResult.shouldRejectFO) {
+    const merchantMsg = merchantMessageFor(error.errorCode);
+    return {
+      success: false,
+      status: "SYNC_FAILED",
+      errorCode: error.errorCode,
+      merchantMessage: merchantMsg.message,
+      shouldRejectFO: false, // 关键: 阻止 reject 已 accept 的 FO
+      shouldAcceptFO: false, // 已经 accept 过了
+      retryable: true, // 允许商家再次重试
+    };
+  }
+
+  // 其他情况走正常流程
+  return baseResult;
+}
+
+/**
+ * 检查是否应该阻止对已 accept FO 的 reject 操作
+ *
+ * v1.7.9 hotfix 辅助函数: 用于在实际调用 shopify.reject 前检查
+ */
+export function shouldBlockRejectForAcceptedFO(
+  foSyncRecord: {
+    shopifyAccepted: boolean;
+    status: FoSyncStatus;
+  },
+  result: HandleSubmitResult
+): boolean {
+  return foSyncRecord.shopifyAccepted && result.shouldRejectFO;
 }

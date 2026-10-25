@@ -93,9 +93,24 @@ export const VALIDATION_ERROR_CODES: WmsErrorCode[] = [
 
 /**
  * v1.7.6: SKU_NOT_MAPPED 不再拒绝 FO，改为 accept + sync-fail
- * 这些错误码应该走 accept-sync-fail 路径而非 reject
+ * v1.7.9: 添加更多 soft 错误码 (基于产品决策: 库存检查后移到仓储订单)
+ *
+ * soft 允许列表 (按优先级):
+ * - 36053 SKU_NOT_MAPPED: SKU 未映射
+ * - 36054 SKU_INACTIVE: SKU 未激活
+ * - 36058 NO_ROUTE: 无可用渠道
+ * - 36056 COUNTRY_NOT_SUPPORTED: 国家不支持
+ * - 36055 INSUFFICIENT_STOCK: 库存不足 (v1.7.9 新增)
+ *
+ * 仍为硬错误: 36059 CUSTOMS_INFO_MISSING (等待 A|B 决策)
  */
-export const ACCEPT_SYNC_FAIL_ERROR_CODES: WmsErrorCode[] = ["SKU_NOT_MAPPED"];
+export const ACCEPT_SYNC_FAIL_ERROR_CODES: WmsErrorCode[] = [
+  "SKU_NOT_MAPPED",
+  "SKU_INACTIVE",
+  "NO_ROUTE",
+  "COUNTRY_NOT_SUPPORTED",
+  "INSUFFICIENT_STOCK",
+];
 
 /**
  * 仍然需要拒绝 FO 的 VALIDATION 错误码

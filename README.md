@@ -4,19 +4,19 @@ Fulfillmen Logistics Shopify App - Node service for WMS integration.
 
 ## WMS Error Code Behavior Table
 
-契约版本: v1.7.6
+契约版本: **v1.7.9**
 
 | Code | errorCode | HTTP | Category | Node Action | Shopify FO |
 |------|-----------|------|----------|-------------|------------|
 | 36050 | IDEMPOTENCY_CONFLICT | 409 | CONFLICT | 不重试，人工 | Reject |
 | 36051 | SUBMIT_IN_PROGRESS | 409 | RETRYABLE | 5s 后重试 | 不变 |
 | 36052 | LEGACY_DUPLICATE | 409 | CONFLICT | 不重试 | Reject |
-| **36053** | **SKU_NOT_MAPPED** | **422** | **VALIDATION** | **Accept + Sync-fail 状态** | **Accept** ⚠️ |
-| 36054 | SKU_INACTIVE | 422 | VALIDATION | 拒绝 | Reject |
-| 36055 | INSUFFICIENT_STOCK | 422 | VALIDATION | 拒绝 | Reject |
-| 36056 | COUNTRY_NOT_SUPPORTED | 422 | VALIDATION | 拒绝 | Reject |
+| **36053** | **SKU_NOT_MAPPED** | **422** | **VALIDATION** | **Accept + SYNC_FAILED** | **Accept** ⚠️ |
+| **36054** | **SKU_INACTIVE** | **422** | **VALIDATION** | **Accept + SYNC_FAILED** | **Accept** ⚠️ |
+| **36055** | **INSUFFICIENT_STOCK** | **422** | **VALIDATION** | **Accept + SYNC_FAILED** | **Accept** ⚠️ |
+| **36056** | **COUNTRY_NOT_SUPPORTED** | **422** | **VALIDATION** | **Accept + SYNC_FAILED** | **Accept** ⚠️ |
 | 36057 | ADDRESS_INVALID | 422 | VALIDATION | 拒绝 | Reject |
-| 36058 | NO_ROUTE | 422 | VALIDATION | 拒绝 | Reject |
+| **36058** | **NO_ROUTE** | **422** | **VALIDATION** | **Accept + SYNC_FAILED** | **Accept** ⚠️ |
 | 36059 | CUSTOMS_INFO_MISSING | 422 | VALIDATION | 拒绝 | Reject |
 | 36060 | BALANCE_INSUFFICIENT | 422 | VALIDATION | 拒绝 | Reject |
 | 36061 | ORDER_NOT_FOUND | 404 | RECONCILE | 对账 | 不变 |
@@ -28,15 +28,27 @@ Fulfillmen Logistics Shopify App - Node service for WMS integration.
 | 36067 | EXTERNAL_NO_VOIDED | 409 | CONFLICT | 不重试 | Reject |
 | — | SKU_MISSING | — | VALIDATION | Node 本地拒绝 | Reject |
 
-### v1.7.6 变更说明
+### v1.7.9 变更说明
 
-**SKU_NOT_MAPPED (36053) 行为变更**:
-- ❌ 旧: 拒绝 Shopify Fulfillment Order
-- ✅ 新: **接受** FO + 本地 SYNC_FAILED 状态 + 同步页展示错误 + 可重试
+**Soft 错误码扩展 (Accept + SYNC_FAILED)**:
+| Code | errorCode | 说明 |
+|------|-----------|------|
+| 36053 | SKU_NOT_MAPPED | SKU 未映射 (v1.7.6) |
+| 36054 | SKU_INACTIVE | SKU 未激活 |
+| 36055 | INSUFFICIENT_STOCK | **库存不足 - 库存检查后移到仓储订单** |
+| 36056 | COUNTRY_NOT_SUPPORTED | 国家不支持 |
+| 36058 | NO_ROUTE | 无可用渠道 |
 
-**原因**: 老板拍板 accept-sync-fail 方案，让商家可以在 WMS 补齐 SKU 映射后重试，而不是被拒绝后无法操作。
+**产品决策**: 老板拍板「这里不需要判断是否有库存，库存会在仓储订单中判断」。
 
-**重试路径**: 映射补齐后可用**同一 externalNo** 重试 submit。
+**Sync Retry Hotfix**: 
+- 已 accept 的 FO 在 Sync Retry 时遇到任何错误（包括硬错误）都**不调用 shopify.reject**
+- 保持 SYNC_FAILED 状态 + 错误码，让商家可以再次 Retry
+- 修复 bug: FO 718743 已 soft accept 后 Retry 遇 INSUFFICIENT_STOCK → REJECT_FAILED
+
+**仍为硬错误**: 36057 ADDRESS_INVALID, 36059 CUSTOMS_INFO_MISSING, 36060 BALANCE_INSUFFICIENT, 36066 REQUEST_INVALID
+
+**重试路径**: 问题修复后可用**同一 externalNo** 重试 submit。
 
 ## Development
 

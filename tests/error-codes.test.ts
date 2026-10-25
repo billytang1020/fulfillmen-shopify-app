@@ -36,20 +36,36 @@ describe("WMS Error Codes", () => {
   });
 
   describe("shouldAcceptSyncFail", () => {
-    it("SKU_NOT_MAPPED should return true (v1.7.6 核心变更)", () => {
+    it("SKU_NOT_MAPPED should return true (v1.7.6)", () => {
       expect(shouldAcceptSyncFail("SKU_NOT_MAPPED")).toBe(true);
     });
 
-    it("SKU_INACTIVE should return false", () => {
-      expect(shouldAcceptSyncFail("SKU_INACTIVE")).toBe(false);
+    it("SKU_INACTIVE should return true (v1.7.9)", () => {
+      expect(shouldAcceptSyncFail("SKU_INACTIVE")).toBe(true);
     });
 
-    it("INSUFFICIENT_STOCK should return false", () => {
-      expect(shouldAcceptSyncFail("INSUFFICIENT_STOCK")).toBe(false);
+    it("INSUFFICIENT_STOCK should return true (v1.7.9 产品决策: 库存检查后移)", () => {
+      expect(shouldAcceptSyncFail("INSUFFICIENT_STOCK")).toBe(true);
     });
 
-    it("ADDRESS_INVALID should return false", () => {
+    it("NO_ROUTE should return true (v1.7.9)", () => {
+      expect(shouldAcceptSyncFail("NO_ROUTE")).toBe(true);
+    });
+
+    it("COUNTRY_NOT_SUPPORTED should return true (v1.7.9)", () => {
+      expect(shouldAcceptSyncFail("COUNTRY_NOT_SUPPORTED")).toBe(true);
+    });
+
+    it("ADDRESS_INVALID should return false (仍为硬错误)", () => {
       expect(shouldAcceptSyncFail("ADDRESS_INVALID")).toBe(false);
+    });
+
+    it("CUSTOMS_INFO_MISSING should return false (36059 仍为硬错误)", () => {
+      expect(shouldAcceptSyncFail("CUSTOMS_INFO_MISSING")).toBe(false);
+    });
+
+    it("BALANCE_INSUFFICIENT should return false (仍为硬错误)", () => {
+      expect(shouldAcceptSyncFail("BALANCE_INSUFFICIENT")).toBe(false);
     });
 
     it("unknown error code should return false", () => {
@@ -58,31 +74,39 @@ describe("WMS Error Codes", () => {
   });
 
   describe("shouldRejectFO", () => {
-    it("SKU_NOT_MAPPED should return false (v1.7.6 不再拒绝 FO)", () => {
+    it("SKU_NOT_MAPPED should return false (v1.7.6 soft)", () => {
       expect(shouldRejectFO("SKU_NOT_MAPPED")).toBe(false);
     });
 
-    it("SKU_INACTIVE should return true", () => {
-      expect(shouldRejectFO("SKU_INACTIVE")).toBe(true);
+    it("SKU_INACTIVE should return false (v1.7.9 soft)", () => {
+      expect(shouldRejectFO("SKU_INACTIVE")).toBe(false);
     });
 
-    it("INSUFFICIENT_STOCK should return true", () => {
-      expect(shouldRejectFO("INSUFFICIENT_STOCK")).toBe(true);
+    it("INSUFFICIENT_STOCK should return false (v1.7.9 soft)", () => {
+      expect(shouldRejectFO("INSUFFICIENT_STOCK")).toBe(false);
     });
 
-    it("ADDRESS_INVALID should return true", () => {
+    it("NO_ROUTE should return false (v1.7.9 soft)", () => {
+      expect(shouldRejectFO("NO_ROUTE")).toBe(false);
+    });
+
+    it("COUNTRY_NOT_SUPPORTED should return false (v1.7.9 soft)", () => {
+      expect(shouldRejectFO("COUNTRY_NOT_SUPPORTED")).toBe(false);
+    });
+
+    it("ADDRESS_INVALID should return true (仍为硬错误)", () => {
       expect(shouldRejectFO("ADDRESS_INVALID")).toBe(true);
     });
 
-    it("NO_ROUTE should return true", () => {
-      expect(shouldRejectFO("NO_ROUTE")).toBe(true);
+    it("CUSTOMS_INFO_MISSING should return true (36059 仍为硬错误)", () => {
+      expect(shouldRejectFO("CUSTOMS_INFO_MISSING")).toBe(true);
     });
 
-    it("BALANCE_INSUFFICIENT should return true", () => {
+    it("BALANCE_INSUFFICIENT should return true (仍为硬错误)", () => {
       expect(shouldRejectFO("BALANCE_INSUFFICIENT")).toBe(true);
     });
 
-    it("REQUEST_INVALID should return true", () => {
+    it("REQUEST_INVALID should return true (仍为硬错误)", () => {
       expect(shouldRejectFO("REQUEST_INVALID")).toBe(true);
     });
   });
@@ -109,24 +133,35 @@ describe("WMS Error Codes", () => {
     });
   });
 
-  describe("ACCEPT_SYNC_FAIL_ERROR_CODES", () => {
-    it("should only contain SKU_NOT_MAPPED", () => {
-      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).toEqual(["SKU_NOT_MAPPED"]);
+  describe("ACCEPT_SYNC_FAIL_ERROR_CODES (v1.7.9)", () => {
+    it("should contain all soft error codes", () => {
+      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).toContain("SKU_NOT_MAPPED");
+      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).toContain("SKU_INACTIVE");
+      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).toContain("NO_ROUTE");
+      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).toContain("COUNTRY_NOT_SUPPORTED");
+      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).toContain("INSUFFICIENT_STOCK");
+    });
+
+    it("should NOT contain hard error codes", () => {
+      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).not.toContain("ADDRESS_INVALID");
+      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).not.toContain("CUSTOMS_INFO_MISSING");
+      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).not.toContain("BALANCE_INSUFFICIENT");
+      expect(ACCEPT_SYNC_FAIL_ERROR_CODES).not.toContain("REQUEST_INVALID");
     });
   });
 
-  describe("REJECT_FO_ERROR_CODES", () => {
-    it("should not contain SKU_NOT_MAPPED", () => {
+  describe("REJECT_FO_ERROR_CODES (v1.7.9)", () => {
+    it("should NOT contain soft error codes", () => {
       expect(REJECT_FO_ERROR_CODES).not.toContain("SKU_NOT_MAPPED");
+      expect(REJECT_FO_ERROR_CODES).not.toContain("SKU_INACTIVE");
+      expect(REJECT_FO_ERROR_CODES).not.toContain("NO_ROUTE");
+      expect(REJECT_FO_ERROR_CODES).not.toContain("COUNTRY_NOT_SUPPORTED");
+      expect(REJECT_FO_ERROR_CODES).not.toContain("INSUFFICIENT_STOCK");
     });
 
-    it("should contain all other VALIDATION codes", () => {
+    it("should contain hard VALIDATION codes", () => {
       const expectedCodes = [
-        "SKU_INACTIVE",
-        "INSUFFICIENT_STOCK",
-        "COUNTRY_NOT_SUPPORTED",
         "ADDRESS_INVALID",
-        "NO_ROUTE",
         "CUSTOMS_INFO_MISSING",
         "BALANCE_INSUFFICIENT",
         "REQUEST_INVALID",

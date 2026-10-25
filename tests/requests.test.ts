@@ -1,65 +1,150 @@
 /**
  * Fulfillment Request 处理逻辑测试
  *
- * 契约: shopify_node_wms_contract_v1.md v1.7.6
+ * 契约: shopify_node_wms_contract_v1.md v1.7.9
  *
  * 测试 accept-sync-fail 行为:
- * - SKU_NOT_MAPPED: accept FO, SYNC_FAILED 状态, 可重试
- * - 其他 VALIDATION: reject FO, REJECTED 状态
+ * - soft 错误码: accept FO, SYNC_FAILED 状态, 可重试
+ * - 硬错误码: reject FO, REJECTED 状态
+ *
+ * v1.7.9 hotfix:
+ * - 已 accept FO 在 Sync Retry 遇硬错误时不 reject，保持 SYNC_FAILED 可重试
  */
 import { describe, it, expect } from "vitest";
 import {
   handleSubmitError,
+  handleRetrySubmitError,
+  shouldBlockRejectForAcceptedFO,
   canRetrySubmit,
   shouldUseSameExternalNo,
 } from "../app/fulfillment/requests.server.js";
 import type { WmsSubmitError } from "../app/fulfillment/types.js";
 
 describe("handleSubmitError", () => {
-  describe("SKU_NOT_MAPPED (v1.7.6 核心变更: accept-sync-fail)", () => {
-    const skuNotMappedError: WmsSubmitError = {
+  describe("soft 错误码 (v1.7.9: accept-sync-fail)", () => {
+    const softErrorCases: Array<{
+      name: string;
+      error: WmsSubmitError;
+      expectedMessageContains: string;
+    }> = [
+      {
+        name: "SKU_NOT_MAPPED (36053)",
+        error: {
+          httpStatus: 422,
+          code: 36053,
+          errorCode: "SKU_NOT_MAPPED",
+          category: "VALIDATION",
+          field: "items[0].sku",
+        },
+        expectedMessageContains: "SKU mapping required",
+      },
+      {
+        name: "SKU_INACTIVE (36054)",
+        error: {
+          httpStatus: 422,
+          code: 36054,
+          errorCode: "SKU_INACTIVE",
+          category: "VALIDATION",
+          field: "items[0].sku",
+        },
+        expectedMessageContains: "SKU is inactive",
+      },
+      {
+        name: "INSUFFICIENT_STOCK (36055) - v1.7.9 核心变更",
+        error: {
+          httpStatus: 422,
+          code: 36055,
+          errorCode: "INSUFFICIENT_STOCK",
+          category: "VALIDATION",
+          field: "items[0].quantity",
+        },
+        expectedMessageContains: "Stock will be checked",
+      },
+      {
+        name: "COUNTRY_NOT_SUPPORTED (36056)",
+        error: {
+          httpStatus: 422,
+          code: 36056,
+          errorCode: "COUNTRY_NOT_SUPPORTED",
+          category: "VALIDATION",
+          field: "consignee.countryCode",
+        },
+        expectedMessageContains: "Country shipping support",
+      },
+      {
+        name: "NO_ROUTE (36058)",
+        error: {
+          httpStatus: 422,
+          code: 36058,
+          errorCode: "NO_ROUTE",
+          category: "VALIDATION",
+          field: "channel",
+        },
+        expectedMessageContains: "Shipping channel configuration",
+      },
+    ];
+
+    softErrorCases.forEach(({ name, error, expectedMessageContains }) => {
+      describe(name, () => {
+        it("应该返回 SYNC_FAILED 状态而非 REJECTED", () => {
+          const result = handleSubmitError(error);
+          expect(result.status).toBe("SYNC_FAILED");
+        });
+
+        it("不应该拒绝 FO (shouldRejectFO = false)", () => {
+          const result = handleSubmitError(error);
+          expect(result.shouldRejectFO).toBe(false);
+        });
+
+        it("应该接受 FO (shouldAcceptFO = true)", () => {
+          const result = handleSubmitError(error);
+          expect(result.shouldAcceptFO).toBe(true);
+        });
+
+        it("应该可重试 (retryable = true)", () => {
+          const result = handleSubmitError(error);
+          expect(result.retryable).toBe(true);
+        });
+
+        it("接受消息不应声称有仓单号", () => {
+          const result = handleSubmitError(error);
+          expect(result.shopifyAcceptMessage).toBeDefined();
+          expect(result.shopifyAcceptMessage).not.toContain("wmsOrderNo");
+          expect(result.shopifyAcceptMessage).toContain(expectedMessageContains);
+        });
+
+        it("success 应该为 false", () => {
+          const result = handleSubmitError(error);
+          expect(result.success).toBe(false);
+        });
+      });
+    });
+  });
+
+  describe("INSUFFICIENT_STOCK (36055) v1.7.9 专项测试", () => {
+    const insufficientStockError: WmsSubmitError = {
       httpStatus: 422,
-      code: 36053,
-      errorCode: "SKU_NOT_MAPPED",
+      code: 36055,
+      errorCode: "INSUFFICIENT_STOCK",
       category: "VALIDATION",
-      field: "items[0].sku",
+      field: "items[0].quantity",
     };
 
-    it("应该返回 SYNC_FAILED 状态而非 REJECTED", () => {
-      const result = handleSubmitError(skuNotMappedError);
+    it("应该走 soft 路径: accept FO + SYNC_FAILED", () => {
+      const result = handleSubmitError(insufficientStockError);
       expect(result.status).toBe("SYNC_FAILED");
-    });
-
-    it("不应该拒绝 FO (shouldRejectFO = false)", () => {
-      const result = handleSubmitError(skuNotMappedError);
+      expect(result.shouldAcceptFO).toBe(true);
       expect(result.shouldRejectFO).toBe(false);
     });
 
-    it("应该接受 FO (shouldAcceptFO = true)", () => {
-      const result = handleSubmitError(skuNotMappedError);
-      expect(result.shouldAcceptFO).toBe(true);
+    it("商家消息应说明库存将在仓储订单检查", () => {
+      const result = handleSubmitError(insufficientStockError);
+      expect(result.merchantMessage).toContain("Insufficient stock");
     });
 
-    it("应该可重试 (retryable = true)", () => {
-      const result = handleSubmitError(skuNotMappedError);
-      expect(result.retryable).toBe(true);
-    });
-
-    it("应该有商家可见消息", () => {
-      const result = handleSubmitError(skuNotMappedError);
-      expect(result.merchantMessage).toContain("SKU is not mapped");
-    });
-
-    it("接受消息不应声称有仓单号", () => {
-      const result = handleSubmitError(skuNotMappedError);
-      expect(result.shopifyAcceptMessage).toBeDefined();
-      expect(result.shopifyAcceptMessage).not.toContain("wmsOrderNo");
-      expect(result.shopifyAcceptMessage).toContain("SKU mapping required");
-    });
-
-    it("success 应该为 false", () => {
-      const result = handleSubmitError(skuNotMappedError);
-      expect(result.success).toBe(false);
+    it("接受消息应说明库存后检", () => {
+      const result = handleSubmitError(insufficientStockError);
+      expect(result.shopifyAcceptMessage).toContain("Stock will be checked during warehouse fulfillment");
     });
   });
 
@@ -97,45 +182,12 @@ describe("handleSubmitError", () => {
     });
   });
 
-  describe("其他 VALIDATION 错误 (仍然拒绝 FO)", () => {
+  describe("硬 VALIDATION 错误 (仍然拒绝 FO)", () => {
     const testCases: Array<{
       name: string;
       error: WmsSubmitError;
       expectedRejectionReason: string;
     }> = [
-      {
-        name: "SKU_INACTIVE (36054)",
-        error: {
-          httpStatus: 422,
-          code: 36054,
-          errorCode: "SKU_INACTIVE",
-          category: "VALIDATION",
-          field: "items[0].sku",
-        },
-        expectedRejectionReason: "INELIGIBLE_PRODUCT",
-      },
-      {
-        name: "INSUFFICIENT_STOCK (36055)",
-        error: {
-          httpStatus: 422,
-          code: 36055,
-          errorCode: "INSUFFICIENT_STOCK",
-          category: "VALIDATION",
-          field: "items[0].quantity",
-        },
-        expectedRejectionReason: "INVENTORY_OUT_OF_STOCK",
-      },
-      {
-        name: "COUNTRY_NOT_SUPPORTED (36056)",
-        error: {
-          httpStatus: 422,
-          code: 36056,
-          errorCode: "COUNTRY_NOT_SUPPORTED",
-          category: "VALIDATION",
-          field: "consignee.countryCode",
-        },
-        expectedRejectionReason: "DECLINED",
-      },
       {
         name: "ADDRESS_INVALID (36057)",
         error: {
@@ -148,18 +200,7 @@ describe("handleSubmitError", () => {
         expectedRejectionReason: "INCORRECT_ADDRESS",
       },
       {
-        name: "NO_ROUTE (36058)",
-        error: {
-          httpStatus: 422,
-          code: 36058,
-          errorCode: "NO_ROUTE",
-          category: "VALIDATION",
-          field: "channel",
-        },
-        expectedRejectionReason: "DECLINED",
-      },
-      {
-        name: "CUSTOMS_INFO_MISSING (36059)",
+        name: "CUSTOMS_INFO_MISSING (36059) - 仍为硬错误",
         error: {
           httpStatus: 422,
           code: 36059,
@@ -465,6 +506,10 @@ describe("shouldUseSameExternalNo", () => {
     expect(shouldUseSameExternalNo("SYNC_FAILED", "SKU_NOT_MAPPED")).toBe(true);
   });
 
+  it("SYNC_FAILED + INSUFFICIENT_STOCK 应该使用相同 externalNo (v1.7.9)", () => {
+    expect(shouldUseSameExternalNo("SYNC_FAILED", "INSUFFICIENT_STOCK")).toBe(true);
+  });
+
   it("PENDING 状态应该使用相同 externalNo", () => {
     expect(shouldUseSameExternalNo("PENDING")).toBe(true);
   });
@@ -474,7 +519,134 @@ describe("shouldUseSameExternalNo", () => {
   });
 
   it("SYNC_FAILED 没有错误码也应该使用相同 externalNo (通用情况)", () => {
-    // SYNC_FAILED 无论什么错误码都可以重试
     expect(shouldUseSameExternalNo("SYNC_FAILED")).toBe(true);
+  });
+});
+
+describe("handleRetrySubmitError (v1.7.9 hotfix)", () => {
+  describe("已 accept FO 遇硬 VALIDATION 错误 - 不 reject", () => {
+    const hardError: WmsSubmitError = {
+      httpStatus: 422,
+      code: 36057,
+      errorCode: "ADDRESS_INVALID",
+      category: "VALIDATION",
+      field: "consignee.address1",
+    };
+
+    const acceptedFoRecord = {
+      shopifyAccepted: true,
+      status: "SYNC_FAILED" as const,
+    };
+
+    it("应该阻止 reject，返回 SYNC_FAILED 状态", () => {
+      const result = handleRetrySubmitError(hardError, acceptedFoRecord);
+      expect(result.status).toBe("SYNC_FAILED");
+      expect(result.shouldRejectFO).toBe(false);
+    });
+
+    it("应该保持可重试", () => {
+      const result = handleRetrySubmitError(hardError, acceptedFoRecord);
+      expect(result.retryable).toBe(true);
+    });
+
+    it("不应该要求再次 accept (已 accept 过)", () => {
+      const result = handleRetrySubmitError(hardError, acceptedFoRecord);
+      expect(result.shouldAcceptFO).toBe(false);
+    });
+
+    it("应该保留原始错误码", () => {
+      const result = handleRetrySubmitError(hardError, acceptedFoRecord);
+      expect(result.errorCode).toBe("ADDRESS_INVALID");
+    });
+  });
+
+  describe("已 accept FO 遇 INSUFFICIENT_STOCK - 走 soft 路径", () => {
+    const insufficientStockError: WmsSubmitError = {
+      httpStatus: 422,
+      code: 36055,
+      errorCode: "INSUFFICIENT_STOCK",
+      category: "VALIDATION",
+      field: "items[0].quantity",
+    };
+
+    const acceptedFoRecord = {
+      shopifyAccepted: true,
+      status: "SYNC_FAILED" as const,
+    };
+
+    it("应该走正常 soft 路径 (INSUFFICIENT_STOCK 现为 soft)", () => {
+      const result = handleRetrySubmitError(insufficientStockError, acceptedFoRecord);
+      expect(result.status).toBe("SYNC_FAILED");
+      expect(result.shouldRejectFO).toBe(false);
+      expect(result.retryable).toBe(true);
+    });
+  });
+
+  describe("未 accept FO 遇硬错误 - 正常 reject", () => {
+    const hardError: WmsSubmitError = {
+      httpStatus: 422,
+      code: 36057,
+      errorCode: "ADDRESS_INVALID",
+      category: "VALIDATION",
+      field: "consignee.address1",
+    };
+
+    const notAcceptedFoRecord = {
+      shopifyAccepted: false,
+      status: "PENDING" as const,
+    };
+
+    it("未 accept 的 FO 遇硬错误应该正常 reject", () => {
+      const result = handleRetrySubmitError(hardError, notAcceptedFoRecord);
+      expect(result.status).toBe("REJECTED");
+      expect(result.shouldRejectFO).toBe(true);
+    });
+  });
+
+  describe("真实 bug 场景: FO 718743 Sync Retry REJECT_FAILED", () => {
+    const insufficientStockError: WmsSubmitError = {
+      httpStatus: 422,
+      code: 36055,
+      errorCode: "INSUFFICIENT_STOCK",
+      category: "VALIDATION",
+      field: "items[0].quantity",
+    };
+
+    const softAcceptedFoRecord = {
+      shopifyAccepted: true,
+      status: "SYNC_FAILED" as const,
+    };
+
+    it("soft accept 后 Retry 遇 INSUFFICIENT_STOCK 不应 reject", () => {
+      const result = handleRetrySubmitError(insufficientStockError, softAcceptedFoRecord);
+      expect(result.shouldRejectFO).toBe(false);
+      expect(result.status).toBe("SYNC_FAILED");
+      expect(result.retryable).toBe(true);
+    });
+
+    it("v1.7.9: INSUFFICIENT_STOCK 是 soft，所以走 accept-sync-fail 路径", () => {
+      const result = handleRetrySubmitError(insufficientStockError, softAcceptedFoRecord);
+      expect(result.shouldAcceptFO).toBe(true);
+    });
+  });
+});
+
+describe("shouldBlockRejectForAcceptedFO", () => {
+  it("已 accept FO + shouldRejectFO=true 应该阻止", () => {
+    const foRecord = { shopifyAccepted: true, status: "SYNC_FAILED" as const };
+    const result = { shouldRejectFO: true } as any;
+    expect(shouldBlockRejectForAcceptedFO(foRecord, result)).toBe(true);
+  });
+
+  it("已 accept FO + shouldRejectFO=false 不需要阻止", () => {
+    const foRecord = { shopifyAccepted: true, status: "SYNC_FAILED" as const };
+    const result = { shouldRejectFO: false } as any;
+    expect(shouldBlockRejectForAcceptedFO(foRecord, result)).toBe(false);
+  });
+
+  it("未 accept FO + shouldRejectFO=true 不需要阻止", () => {
+    const foRecord = { shopifyAccepted: false, status: "PENDING" as const };
+    const result = { shouldRejectFO: true } as any;
+    expect(shouldBlockRejectForAcceptedFO(foRecord, result)).toBe(false);
   });
 });

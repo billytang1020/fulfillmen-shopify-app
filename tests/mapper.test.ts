@@ -61,24 +61,13 @@ describe("merchantMessageFor", () => {
 });
 
 describe("rejectionReasonFor", () => {
-  it("SKU_INACTIVE 应该返回 INELIGIBLE_PRODUCT", () => {
-    expect(rejectionReasonFor("SKU_INACTIVE")).toBe("INELIGIBLE_PRODUCT");
-  });
-
-  it("INSUFFICIENT_STOCK 应该返回 INVENTORY_OUT_OF_STOCK", () => {
-    expect(rejectionReasonFor("INSUFFICIENT_STOCK")).toBe("INVENTORY_OUT_OF_STOCK");
-  });
-
+  // 硬错误码仍有 rejection reason 映射
   it("ADDRESS_INVALID 应该返回 INCORRECT_ADDRESS", () => {
     expect(rejectionReasonFor("ADDRESS_INVALID")).toBe("INCORRECT_ADDRESS");
   });
 
-  it("COUNTRY_NOT_SUPPORTED 应该返回 DECLINED", () => {
-    expect(rejectionReasonFor("COUNTRY_NOT_SUPPORTED")).toBe("DECLINED");
-  });
-
-  it("NO_ROUTE 应该返回 DECLINED", () => {
-    expect(rejectionReasonFor("NO_ROUTE")).toBe("DECLINED");
+  it("CUSTOMS_INFO_MISSING 应该返回 INELIGIBLE_PRODUCT", () => {
+    expect(rejectionReasonFor("CUSTOMS_INFO_MISSING")).toBe("INELIGIBLE_PRODUCT");
   });
 
   it("BALANCE_INSUFFICIENT 应该返回 DECLINED", () => {
@@ -101,9 +90,27 @@ describe("rejectionReasonFor", () => {
     expect(rejectionReasonFor("UNKNOWN")).toBeUndefined();
   });
 
-  // v1.7.6: SKU_NOT_MAPPED 不再映射拒绝原因，因为不再拒绝 FO
-  it("SKU_NOT_MAPPED 不应该有拒绝原因映射 (v1.7.6)", () => {
-    expect(rejectionReasonFor("SKU_NOT_MAPPED")).toBeUndefined();
+  // v1.7.9: soft 错误码不再映射拒绝原因，因为不再拒绝 FO
+  describe("soft 错误码不应有拒绝原因映射 (v1.7.9)", () => {
+    it("SKU_NOT_MAPPED 不应该有拒绝原因映射", () => {
+      expect(rejectionReasonFor("SKU_NOT_MAPPED")).toBeUndefined();
+    });
+
+    it("SKU_INACTIVE 不应该有拒绝原因映射", () => {
+      expect(rejectionReasonFor("SKU_INACTIVE")).toBeUndefined();
+    });
+
+    it("INSUFFICIENT_STOCK 不应该有拒绝原因映射", () => {
+      expect(rejectionReasonFor("INSUFFICIENT_STOCK")).toBeUndefined();
+    });
+
+    it("COUNTRY_NOT_SUPPORTED 不应该有拒绝原因映射", () => {
+      expect(rejectionReasonFor("COUNTRY_NOT_SUPPORTED")).toBeUndefined();
+    });
+
+    it("NO_ROUTE 不应该有拒绝原因映射", () => {
+      expect(rejectionReasonFor("NO_ROUTE")).toBeUndefined();
+    });
   });
 });
 
