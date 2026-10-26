@@ -1,38 +1,59 @@
-# Fulfillmen Logistics Shopify App Configuration
-# Production configuration for Partner Dashboard / CLI deploy
-# App URL: https://app.fulfillmen.com
-
-# Client ID from Shopify Partners Dashboard
-# TODO: Add client_id after app creation in Partners Dashboard
-# client_id = ""
-
+# PRODUCTION app config (Partner app: Fulfillmen Logistics). Deploy with: shopify app deploy --config shopify.app.toml.
+# App URL / redirects: https://shopify.fulfillmen.com (formal; HK ECS + tunnel deploy is Jeff's).
+# Only non-secret values belong here (client_id is public). The client secret
+# lives only in .env (Dev-01: C:\wms-secrets\shopify-dev\.env), never in git.
+client_id = ""  # TODO: paste the client_id of the "Fulfillmen Logistics" app from the Partner Dashboard
 name = "Fulfillmen Logistics"
-application_url = "https://app.fulfillmen.com"
+application_url = "https://shopify.fulfillmen.com"
 embedded = true
 
+[build]
+automatically_update_urls_on_dev = false
+include_config_on_deploy = true
+
 [access_scopes]
-scopes = "read_assigned_fulfillment_orders,read_products,write_assigned_fulfillment_orders,write_fulfillments"
+# Minimal set. Add read_inventory only when stock sync (v1.1) ships. No read_all_orders.
+# Added read_orders for orders/paid webhook, write_third_party_fulfillment_orders for submitFulfillmentRequest.
+scopes = "read_assigned_fulfillment_orders,read_orders,read_products,write_assigned_fulfillment_orders,write_fulfillments,write_third_party_fulfillment_orders"
+use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [
-  "https://app.fulfillmen.com/auth/callback",
-  "https://app.fulfillmen.com/auth/shopify/callback"
-]
+redirect_urls = [ "https://shopify.fulfillmen.com/auth/callback", "https://shopify.fulfillmen.com/auth/shopify/callback" ]
 
 [webhooks]
-api_version = "2024-01"
+api_version = "2026-10"
 
-[[webhooks.subscriptions]]
-topics = ["fulfillment_orders/cancellation_request_submitted"]
-uri = "https://app.fulfillmen.com/webhooks"
+  # Handled by: app/routes/webhooks.app.uninstalled.tsx (deletes sessions + shop data)
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
 
-[[webhooks.subscriptions]]
-topics = ["fulfillment_orders/fulfillment_request_submitted"]
-uri = "https://app.fulfillmen.com/webhooks"
+  # Handled by: app/routes/webhooks.app.scopes_update.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
 
-[[webhooks.subscriptions]]
-topics = ["fulfillment_orders/order_routing_complete"]
-uri = "https://app.fulfillmen.com/webhooks"
+  # Mandatory compliance webhooks (public apps). HMAC verified, 401 on failure.
+  # Handled by: app/routes/webhooks.customers.data_request.tsx
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request" ]
+  uri = "/webhooks/customers/data_request"
+
+  # Handled by: app/routes/webhooks.customers.redact.tsx
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/redact" ]
+  uri = "/webhooks/customers/redact"
+
+  # Handled by: app/routes/webhooks.shop.redact.tsx
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "shop/redact" ]
+  uri = "/webhooks/shop/redact"
+
+  # Auto soft-submit: orders/paid triggers automatic fulfillment request submission when enabled.
+  # Handled by: app/routes/webhooks.orders.paid.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
 
 [pos]
 embedded = false

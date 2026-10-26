@@ -1,0 +1,58 @@
+# DEVELOPMENT app config (separate Partner app: Fulfillmen (Dev), dev store test2026-3). Use with: shopify app dev --config dev. application_url is rewritten to the CLI tunnel on dev.
+# Only non-secret values belong here (client_id is public). The client secret
+# lives only in .env (Dev-01: C:\wms-secrets\shopify-dev\.env), never in git.
+client_id = ""  # TODO: paste the client_id of the "Fulfillmen (Dev)" app from the Partner Dashboard
+name = "Fulfillmen (Dev)"
+application_url = "https://dev-shopify.fulfillmen.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+include_config_on_deploy = true
+
+[access_scopes]
+# Minimal set. Add read_inventory only when stock sync (v1.1) ships. No read_all_orders.
+# Added read_orders for orders/paid webhook, write_third_party_fulfillment_orders for submitFulfillmentRequest.
+scopes = "read_assigned_fulfillment_orders,read_orders,read_products,write_assigned_fulfillment_orders,write_fulfillments,write_third_party_fulfillment_orders"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ "https://dev-shopify.fulfillmen.com/auth/callback", "https://dev-shopify.fulfillmen.com/auth/shopify/callback" ]
+
+[webhooks]
+api_version = "2026-10"
+
+  # Handled by: app/routes/webhooks.app.uninstalled.tsx (deletes sessions + shop data)
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  # Handled by: app/routes/webhooks.app.scopes_update.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  # Mandatory compliance webhooks (public apps). HMAC verified, 401 on failure.
+  # Handled by: app/routes/webhooks.customers.data_request.tsx
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request" ]
+  uri = "/webhooks/customers/data_request"
+
+  # Handled by: app/routes/webhooks.customers.redact.tsx
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/redact" ]
+  uri = "/webhooks/customers/redact"
+
+  # Handled by: app/routes/webhooks.shop.redact.tsx
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "shop/redact" ]
+  uri = "/webhooks/shop/redact"
+
+  # Auto soft-submit: orders/paid triggers automatic fulfillment request submission when enabled.
+  # Handled by: app/routes/webhooks.orders.paid.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
+
+[pos]
+embedded = false
