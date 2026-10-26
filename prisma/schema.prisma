@@ -1,0 +1,217 @@
+// Fulfillmen Logistics – Shopify app database (Node side only).
+// Holds: Shopify sessions (offline token), per-shop config, compliance-request
+// audit log. Never holds order recipient PII and never connects to the WMS DB.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Set in .env only (Dev-01: C:\wms-secrets\shopify-dev\.env). Never commit.
+  url      = env("DATABASE_URL")
+}
+
+// Shape required by @shopify/shopify-app-session-storage-prisma.
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@index([shop])
+}
+
+// One row per installed shop. Deleted on app/uninstalled and shop/redact.
+model Shop {
+  shop                 String    @id
+  installedAt          DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  // WMS binding (contract v1 section 2). Set after binding/bind succeeds.
+  wmsCustomerCode      String? // cusCode: display only, never used as a lookup key
+  wmsCustomerId        String? // WMS customer id from binding/verify (stable key for ops/WMS lookups)
+  wmsKeyId             String? // fk_test_… / fk_live_… (not secret, loggable)
+  wmsKeyEnc            String? // merchant key secret, AES-256-GCM (SHOPIFY_TOKEN_ENC_KEY)
+  wmsBindingId         String?
+  wmsShopId            String?
+  boundAt              DateTime?
+  // Filled after fulfillmentServiceCreate (GraphQL) on install.
+  fulfillmentServiceId String?
+  locationId           String?
+  // GS2: consecutive removeFulfillmentService errors on merchant Disconnect.
+  fsRemoveFailures     Int       @default(0)
+  fsRemoveFirstFailAt  DateTime?
+  // Auto soft-submit: when true, orders/paid triggers automatic fulfillment request submission.
+  // Default false: merchant must click Request Fulfillment manually.
+  autoSoftSubmit       Boolean   @default(false)
+}
+
+// GM4: one row per WMS unbind (merchant / uninstall / shop redact / ops force),
+// so ops still know the shop's WMS customer after the Shop row is cleared or
+// deleted. IDs only: no key secret, no PII. Purged with the compliance audit.
+model WmsBindingHistory {
+  id        String    @id @default(cuid())
+  shop      String
+  cusCode   String // display only
+  customerId String? // WMS customer id (lookup key); null for bindings made before 2026-10-20
+  keyId     String // fk_… id part only (not secret)
+  bindingId String?
+  wmsShopId String?
+  boundAt   DateTime?
+  unboundAt DateTime  @default(now())
+  reason    String // MERCHANT / UNINSTALLED / SHOP_REDACT / OPS_FORCE
+  outcome   String // ok / queued:<code> / rejected:<code> / local_only:<code>
+
+  @@index([shop, unboundAt])
+}
+
+// GM4: who did what by hand (ops scripts). No secrets, no PII.
+model OpsAuditLog {
+  id     String   @id @default(cuid())
+  at     DateTime @default(now())
+  actor  String
+  action String // compliance.complete / binding.force_unbind
+  target String // ComplianceRequest id / shop domain
+  detail String?
+
+  @@index([target])
+}
+
+// Retry queue for WMS binding/unbind calls that failed during app/uninstalled
+// or shop/redact (contract section 2.2-5). Holds the key encrypted; row is
+// deleted once WMS confirms. Never blocks local data deletion.
+model WmsUnbindJob {
+  id            String   @id @default(cuid())
+  shop          String
+  cusCode       String
+  keyId         String
+  keyEnc        String
+  reason        String // UNINSTALLED / SHOP_REDACT / MERCHANT
+  attempts      Int      @default(0)
+  nextAttemptAt DateTime @default(now())
+  lastErrorCode String?
+  createdAt     DateTime @default(now())
+
+  @@index([nextAttemptAt])
+}
+
+// Audit trail for GDPR/CCPA compliance webhooks. IDs only, no PII.
+// Kept after shop deletion as evidence the request was handled.
+model ComplianceRequest {
+  id                String    @id @default(cuid())
+  webhookId         String?   @unique
+  topic             String
+  shop              String
+  shopifyCustomerId String?
+  orderIds          String?
+  status            String
+  receivedAt        DateTime  @default(now())
+  completedAt       DateTime?
+  lastAlertAt       DateTime?
+  // GM4: WMS customer at the time of the request (from the binding or WmsBindingHistory).
+  wmsCusCode        String? // display only
+  wmsCustomerId     String? // WMS customer id (lookup key for the manual WMS action)
+  completedBy       String?
+  completionNote    String?
+
+  @@index([shop])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Fulfillment module (owner: Ryan, app/fulfillment/*). IDs, WMS numbers,
+// status, failure reason and timestamps ONLY. No recipient name/address/
+// phone/email, no tracking numbers, no WMS secrets (those live with the
+// binding owner). Kept after app/uninstalled until shop/redact.
+// ---------------------------------------------------------------------------
+
+model FulfillmentShop {
+  shop                 String    @id
+  fulfillmentServiceId String?
+  locationId           String?
+  callbackUrl          String?
+  fsStatus             String    @default("PENDING")
+  installedAt          DateTime  @default(now())
+  uninstalledAt        DateTime?
+  lastErrorCode        String?
+  lastErrorMessage     String?   @db.VarChar(300)
+  updatedAt            DateTime  @updatedAt
+}
+
+model FulfillmentOrderSync {
+  fulfillmentOrderId  String    @id
+  shop                String
+  orderId             String?
+  externalNo          String    @unique
+  wmsOrderNo          String?
+  shopOrderId         String?
+  wmsOutboundIds      String[]
+  // [{packageKey, revision, fulfillmentId, trackingPending?}] - ids only, no PII
+  shippedPackages     Json?
+  status              String
+  rejectionReason     String?
+  attempts            Int       @default(0)
+  cancelAttempts      Int       @default(0)
+  firstAttemptAt      DateTime?
+  nextRetryAt         DateTime?
+  lastErrorCode       String?
+  lastErrorMessage    String?   @db.VarChar(300)
+  // M3: light tracking reconcile window (trackingPending package or failed tracking update), max 14 days
+  trackingCheckUntil  DateTime?
+  // M2: optimistic lock for package merges (compare-and-set on write)
+  version             Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([shop, status])
+  @@index([status, updatedAt])
+  @@index([trackingCheckUntil, updatedAt])
+}
+
+model FulfillmentEvent {
+  id                 String   @id @default(cuid())
+  fulfillmentOrderId String
+  shop               String
+  action             String
+  result             String
+  errorCode          String?
+  at                 DateTime @default(now())
+
+  @@index([fulfillmentOrderId])
+  @@index([shop])
+}
+
+// WMS event de-duplication (eventId = 32 hex). Kept >= 48 h (WMS retries ~22 h).
+// M1: durable receipt + work item. payload = parsed WMS event (ids/status/tracking/items; no recipient data).
+model WmsEventReceipt {
+  eventId       String    @id
+  state         String // pending | processing | done | failed | dead
+  result        String?
+  eventType     String?
+  shop          String?
+  externalNo    String?
+  payload       Json?
+  attempts      Int       @default(0)
+  leaseUntil    DateTime?
+  nextAttemptAt DateTime?
+  lastError     String?   @db.VarChar(300)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([state, updatedAt])
+  @@index([state, nextAttemptAt])
+  @@index([shop, state])
+}
