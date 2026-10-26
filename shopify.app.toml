@@ -11,7 +11,9 @@ application_url = "https://app.fulfillmen.com"
 embedded = true
 
 [access_scopes]
-scopes = "read_assigned_fulfillment_orders,read_products,write_assigned_fulfillment_orders,write_fulfillments"
+# Added read_orders for orders/paid webhook trigger
+# Added write_third_party_fulfillment_orders for fulfillmentOrderSubmitFulfillmentRequest mutation
+scopes = "read_assigned_fulfillment_orders,read_orders,read_products,write_assigned_fulfillment_orders,write_fulfillments,write_third_party_fulfillment_orders"
 
 [auth]
 redirect_urls = [
@@ -33,6 +35,10 @@ uri = "https://app.fulfillmen.com/webhooks"
 [[webhooks.subscriptions]]
 topics = ["fulfillment_orders/order_routing_complete"]
 uri = "https://app.fulfillmen.com/webhooks"
+
+[[webhooks.subscriptions]]
+topics = ["orders/paid"]
+uri = "https://app.fulfillmen.com/webhooks/orders/paid"
 
 [pos]
 embedded = false

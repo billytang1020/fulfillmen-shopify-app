@@ -1,0 +1,69 @@
+// Fulfillmen Logistics Shopify App - Prisma Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Shopify Shop configuration and WMS binding
+model Shop {
+  id        String   @id @default(cuid())
+  /// Shopify shop domain (e.g., my-store.myshopify.com)
+  domain    String   @unique
+  /// Shopify access token for API calls
+  accessToken String?
+
+  /// WMS API key for Fulfillmen integration
+  wmsApiKey String?
+  /// WMS customer code
+  wmsCusCode String?
+  /// Whether WMS binding is connected and ready
+  wmsConnected Boolean @default(false)
+
+  /// Automatic order intake: when enabled, paid orders auto-submit to Fulfillmen
+  /// Default false: merchant must click Request Fulfillment manually
+  autoSoftSubmit Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  fulfillmentOrderSyncs FulfillmentOrderSync[]
+
+  @@index([domain])
+}
+
+/// Fulfillment Order sync status tracking
+model FulfillmentOrderSync {
+  id                  String   @id @default(cuid())
+  /// Shopify Fulfillment Order ID
+  fulfillmentOrderId  String
+  /// External order number (SFO{foNumeric})
+  externalNo          String
+  /// WMS order number (assigned after successful submit)
+  wmsOrderNo          String?
+  /// Sync status
+  status              String   @default("PENDING")
+  /// Last error code from WMS
+  lastErrorCode       String?
+  /// Merchant-facing message
+  merchantMessage     String?
+  /// Whether Shopify FO has been accepted
+  shopifyAccepted     Boolean  @default(false)
+  /// Retry count
+  retryCount          Int      @default(0)
+
+  shopId    String
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shopId, fulfillmentOrderId])
+  @@index([shopId])
+  @@index([fulfillmentOrderId])
+  @@index([status])
+}

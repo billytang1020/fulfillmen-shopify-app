@@ -1,0 +1,44 @@
+# Fulfillmen Logistics Shopify App Configuration - Development
+# Development configuration for local testing
+# App URL: https://dev.app.fulfillmen.com (or ngrok tunnel)
+
+# Client ID from Shopify Partners Dashboard (dev app)
+# TODO: Add client_id after dev app creation in Partners Dashboard
+# client_id = ""
+
+name = "Fulfillmen Logistics (Dev)"
+application_url = "https://dev.app.fulfillmen.com"
+embedded = true
+
+[access_scopes]
+# Added read_orders for orders/paid webhook trigger
+# Added write_third_party_fulfillment_orders for fulfillmentOrderSubmitFulfillmentRequest mutation
+scopes = "read_assigned_fulfillment_orders,read_orders,read_products,write_assigned_fulfillment_orders,write_fulfillments,write_third_party_fulfillment_orders"
+
+[auth]
+redirect_urls = [
+  "https://dev.app.fulfillmen.com/auth/callback",
+  "https://dev.app.fulfillmen.com/auth/shopify/callback"
+]
+
+[webhooks]
+api_version = "2024-01"
+
+[[webhooks.subscriptions]]
+topics = ["fulfillment_orders/cancellation_request_submitted"]
+uri = "https://dev.app.fulfillmen.com/webhooks"
+
+[[webhooks.subscriptions]]
+topics = ["fulfillment_orders/fulfillment_request_submitted"]
+uri = "https://dev.app.fulfillmen.com/webhooks"
+
+[[webhooks.subscriptions]]
+topics = ["fulfillment_orders/order_routing_complete"]
+uri = "https://dev.app.fulfillmen.com/webhooks"
+
+[[webhooks.subscriptions]]
+topics = ["orders/paid"]
+uri = "https://dev.app.fulfillmen.com/webhooks/orders/paid"
+
+[pos]
+embedded = false
